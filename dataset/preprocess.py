@@ -1,0 +1,1 @@
+# Não é necessário, como o dataset é gerado artificialmentel, não existem outliers, nem dados repetidos 

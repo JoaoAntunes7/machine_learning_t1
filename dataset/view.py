@@ -4,6 +4,18 @@ import seaborn as sns
 import pandas as pd
 import numpy as np
 
+def plot_histogram(df, column, bins=30):
+    """
+    Plota um histograma para a coluna especificada.
+    """
+    plt.figure(figsize=(10, 6))
+    sns.histplot(df[column], bins=bins, kde=True, color='skyblue')
+    plt.title(f'Histograma de {column}', fontsize=14, fontweight='bold')
+    plt.xlabel(column.replace('_', ' ').title(), fontsize=12)
+    plt.ylabel('Frequência', fontsize=12)
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.show()
 
 def report_outliers_iqr(df, columns=None, group_col=None, multiplier=1.5):
     """

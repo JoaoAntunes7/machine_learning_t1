@@ -1,49 +1,83 @@
-from pathlib import Path
+import numpy as np
+import pandas as pd
+from dataset.load_uci_dataset import load_uci_dataset
+import model.model_choice as mc
 
-from sklearn.naive_bayes import MultinomialNB
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
 
-from dataset.load import load_dataset
-import dataset.preprocess as preprocess
-import models.train as train
-import models.test as test
+# =========================
+# CONFIG
+# =========================
+CSV_PATH = "./bank_marketing.csv"  # arquivo UCI
+TARGET_COL = "y"
+DROP_COLS = ["duration"]                          # evita data leakage
+TEST_SIZE = 0.2
+RANDOM_STATE = 42
 
+# =========================
+# LOAD
+# =========================
+load_uci_dataset(CSV_PATH, ucirepo_id=222)
 
-BASE_DIR = Path(__file__).resolve().parent
-dataset_path = BASE_DIR / "dataset" / "dataset.csv"
-preprocessed_dataset_path = BASE_DIR / "dataset" / "preprocessed_dataset.csv"
+df = pd.read_csv(CSV_PATH, sep=None, engine="python").drop_duplicates()
 
+df.columns = df.columns.str.strip()
 
-def save_dataset(df, path):
-    df.to_csv(path, index=False)
+if TARGET_COL not in df.columns:
+    raise ValueError(f"Coluna alvo '{TARGET_COL}' não encontrada. Colunas: {list(df.columns)}")
 
+drop_existing = [c for c in DROP_COLS if c in df.columns and c != TARGET_COL]
+X = df.drop(columns=[TARGET_COL] + drop_existing)
+y = df[TARGET_COL].astype("string").str.strip()
 
-def naive_bayes(df):
-    if df is None or df.empty:
-        raise ValueError("Dataset vazio ou inválido.")
+num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+cat_cols = X.select_dtypes(exclude=[np.number]).columns.tolist()
 
-    df = preprocess.preprocess_naive_bayes(df)
-    save_dataset(df, preprocessed_dataset_path)
-    print("Preprocessed dataset saved successfully!")
+# =========================
+# PREPROCESS + MODEL
+# =========================
 
-    X_train, X_test, y_train, y_test = preprocess.dataset_split(df)
-    print("Dataset split into training and testing sets successfully!")
+# GaussianNB    -> para variáveis numéricas (assume distribuição normal), como são dados bancários,
+#                  é razoável assumir que as variáveis numéricas seguem uma distribuição normal (ou próxima disso). 
+#                  Portanto, o GaussianNB é a escolha mais apropriada para este dataset.
+# MultinomialNB -> para variáveis categóricas (usa contagem de frequências)
+#                  Não é o ideal pra esse tipo de dataset e portanto não teve um desempenho tão bom.
+#                  Gerou muitos falsos negativos 
+#                  (Precisa ser executado com o MinMaxScaler, por conta de valores naturalmente negativos)
 
-    model = MultinomialNB()
-    model = train.train_naive_bayes(model, X_train, y_train)
-    print("Naive Bayes model trained successfully!")
+# StandardScaler -> sensível a outiliers (usa média e desvio padrão)
+# RobustScaler   -> menos sensível a outliers (usa mediana e IQR)
+# MinMaxScaler   -> escala para [0, 1], mas pode ser distorcido por outliers
+model = mc.get_model(num_cols, cat_cols, model=mc.GaussianNB(), scaler=mc.RobustScaler())
 
-    test.test_naive_bayes(model, X_test, y_test)
-    print("Naive Bayes model tested successfully!")
+# =========================
+# SPLIT
+# =========================
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+)
 
+# Treino real
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+acc = accuracy_score(y_test, y_pred)
+f1m = f1_score(y_test, y_pred, average="macro")
 
-def main():
-    print("Loading dataset...")
-    df = load_dataset(dataset_path)
-    print("Dataset loaded successfully!")
+# CV
+cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=RANDOM_STATE)
+cv_scores = cross_val_score(model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
 
-    naive_bayes(df)
-    print("Ending program...")
+# =========================
+# RESULTADOS
+# =========================
+print("=== RESULTADOS ===")
+print(f"Naive Bayes acc:        {acc:.4f}")
+print(f"Naive Bayes f1_macro:   {f1m:.4f}")
+print(f"CV acc (10-fold):        {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
 
+print("\nMatriz de confusão:")
+print(confusion_matrix(y_test, y_pred))
 
-if __name__ == "__main__":
-    main()
+print("\nRelatório:")
+print(classification_report(y_test, y_pred, zero_division=0))

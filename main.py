@@ -3,16 +3,26 @@ import pandas as pd
 from dataset.load_uci_dataset import load_uci_dataset
 import model.model_choice as mc
 
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score, GridSearchCV, ParameterGrid
+from sklearn.preprocessing import LabelEncoder
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
-from sklearn.tree import plot_tree, export_text
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    classification_report,
+    confusion_matrix,
+    recall_score,
+    make_scorer,
+)
+from sklearn.tree import plot_tree
 import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
+from tqdm_joblib import tqdm_joblib
 
 # =========================
 # CONFIG
 # =========================
-CSV_PATH = "./bank_marketing.csv"  # arquivo UCI
+CSV_PATH = "./dataset/bank_marketing.csv"  # arquivo UCI
 TARGET_COL = "y"
 DROP_COLS = ["duration"]                          # evita data leakage
 TEST_SIZE = 0.2
@@ -32,13 +42,27 @@ if TARGET_COL not in df.columns:
 
 drop_existing = [c for c in DROP_COLS if c in df.columns and c != TARGET_COL]
 X = df.drop(columns=[TARGET_COL] + drop_existing)
-y = df[TARGET_COL].astype("string").str.strip()
+y = df[TARGET_COL].astype(str).str.strip()
+
+# codifica alvo: ex. no->0, yes->1
+le = LabelEncoder()
+y = le.fit_transform(y)
+
+# opcional: garante o índice da classe positiva "yes"
+POS_LABEL = int(le.transform(["yes"])[0])
 
 num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
 cat_cols = X.select_dtypes(exclude=[np.number]).columns.tolist()
 
 # =========================
-# PREPROCESS + MODEL
+# SPLIT
+# =========================
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+)
+
+# =========================
+# PREPROCESS + NB_MODEL
 # =========================
 
 # GaussianNB    -> para variáveis numéricas (assume distribuição normal), como são dados bancários,
@@ -52,29 +76,22 @@ cat_cols = X.select_dtypes(exclude=[np.number]).columns.tolist()
 # StandardScaler -> sensível a outiliers (usa média e desvio padrão)
 # RobustScaler   -> menos sensível a outliers (usa mediana e IQR)
 # MinMaxScaler   -> escala para [0, 1], mas pode ser distorcido por outliers
-model = mc.get_model(num_cols, cat_cols, model=mc.GaussianNB(), scaler=mc.RobustScaler())
-
-# =========================
-# SPLIT
-# =========================
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
-)
+nb_model = mc.get_model(num_cols, cat_cols, model=mc.GaussianNB(), scaler=mc.RobustScaler())
 
 # Treino real
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
+nb_model.fit(X_train, y_train)
+y_pred = nb_model.predict(X_test)
 acc = accuracy_score(y_test, y_pred)
 f1m = f1_score(y_test, y_pred, average="macro")
 
 # CV
 cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=RANDOM_STATE)
-cv_scores = cross_val_score(model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
+cv_scores = cross_val_score(nb_model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
 
 # =========================
 # RESULTADOS
 # =========================
-print("=== RESULTADOS ===")
+print("=== NAIVE BAYES ===")
 print(f"Naive Bayes acc:        {acc:.4f}")
 print(f"Naive Bayes f1_macro:   {f1m:.4f}")
 print(f"CV acc (10-fold):        {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
@@ -90,7 +107,7 @@ print(classification_report(y_test, y_pred, zero_division=0))
 # =========================
 # max_depth=5 limita a profundidade para evitar overfitting e manter legibilidade.
 # criterion="gini" mede a impureza dos nós (padrão e eficiente).
-dt_model = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(max_depth=5, criterion="gini", random_state=RANDOM_STATE))
+dt_model = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(max_depth=5, criterion="gini", random_state=RANDOM_STATE), scaler=mc.RobustScaler())
 
 dt_model.fit(X_train, y_train)
 dt_pred = dt_model.predict(X_test)
@@ -113,25 +130,21 @@ preprocessor      = dt_model.named_steps["preprocessor"]
 ohe_feature_names = preprocessor.named_transformers_["cat"]["onehot"].get_feature_names_out(cat_cols)
 all_feature_names = np.array(num_cols + list(ohe_feature_names))
 
-importances = dt_model.named_steps["classifier"].feature_importances_
-top_idx     = np.argsort(importances)[::-1][:10]  # top 10
-
-print("\nTop 10 features mais importantes (Árvore de Decisão):")
-for i in top_idx:
-    print(f"  {all_feature_names[i]:<35} {importances[i]:.4f}")
-
-# Visualização da árvore (primeiros 3 níveis para não poluir)
 fig, ax = plt.subplots(figsize=(20, 8))
+
+# classes do modelo (0/1) -> rótulos originais ("no"/"yes")
+tree_class_names = [str(c) for c in le.inverse_transform(dt_model.classes_.astype(int))]
+
 plot_tree(
     dt_model.named_steps["classifier"],
     feature_names=all_feature_names,
-    class_names=dt_model.classes_,
+    class_names=tree_class_names,  # antes: dt_model.classes_
     filled=True,
-    max_depth=3,
+    max_depth=5,
     ax=ax,
     fontsize=8,
 )
-plt.title("Árvore de Decisão (primeiros 3 níveis)")
+plt.title("Árvore de Decisão (primeiros 5 níveis)")
 plt.tight_layout()
 plt.savefig("decision_tree.png", dpi=150)
 print("\nÁrvore salva em decision_tree.png")
@@ -139,72 +152,88 @@ print("\nÁrvore salva em decision_tree.png")
 # =========================
 # KNN
 # =========================
-# KNN classifica um ponto novo pela votação dos K vizinhos mais próximos.
-# DIFERENTE da Árvore de Decisão: KNN é baseado em distância, então
-# a normalização das features é OBRIGATÓRIA (já feita pelo RobustScaler no pipeline).
-# n_neighbors=11: ímpar para evitar empates em classificação binária.
-from sklearn.inspection import permutation_importance
-from lime.lime_tabular import LimeTabularExplainer
 
-knn_model = mc.get_model(num_cols, cat_cols, model=mc.KNeighborsClassifier(n_neighbors=11), scaler=mc.RobustScaler())
+'''
+knn_base = mc.get_model(
+    num_cols,
+    cat_cols,
+    model=mc.KNeighborsClassifier(),
+    scaler=mc.RobustScaler(),
+)
+
+param_grid = {
+    "classifier__n_neighbors": list(range(3, 32, 2)),
+    "classifier__weights": ["uniform", "distance"],
+    "classifier__p": [1, 2],
+}
+
+scoring = {
+    "accuracy": "accuracy",
+    "f1_macro": "f1_macro",
+    "recall_yes": make_scorer(
+        recall_score,
+        average="binary",
+        pos_label=POS_LABEL,
+        zero_division=0,
+    ),
+}
+
+knn_search = GridSearchCV(
+    estimator=knn_base,
+    param_grid=param_grid,
+    scoring=scoring,
+    refit="f1_macro",
+    cv=cv,
+    n_jobs=-1,           # paralelo + barra de progresso
+    error_score="raise", # mostra erro real sem esconder
+)
+
+total_fits = len(ParameterGrid(param_grid)) * cv.get_n_splits(X_train, y_train)
+with tqdm_joblib(tqdm(total=total_fits, desc="GridSearchCV (KNN)")):
+    knn_search.fit(X_train, y_train)
+
+knn_model = knn_search.best_estimator_
+'''
+
+knn_model = mc.get_model(
+    num_cols,
+    cat_cols,
+    model=mc.KNeighborsClassifier(n_neighbors=3, weights="distance", p=1),
+    scaler=mc.RobustScaler(),
+)
 
 knn_model.fit(X_train, y_train)
 knn_pred = knn_model.predict(X_test)
 knn_acc  = accuracy_score(y_test, knn_pred)
 knn_f1   = f1_score(y_test, knn_pred, average="macro")
+knn_rec  = recall_score(y_test, knn_pred, pos_label=POS_LABEL)
+knn_cv   = cross_val_score(knn_model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
 
-knn_cv = cross_val_score(knn_model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
+'''
+cv_res = pd.DataFrame(knn_search.cv_results_)
+best_acc_row = cv_res.loc[cv_res["mean_test_accuracy"].idxmax()]
+best_f1_row  = cv_res.loc[cv_res["mean_test_f1_macro"].idxmax()]
+best_rec_row = cv_res.loc[cv_res["mean_test_recall_yes"].idxmax()]
+'''
 
 print("\n=== KNN ===")
+#print(f"Melhor (refit=f1_macro): {knn_search.best_params_}")
 print(f"Acurácia:         {knn_acc:.4f}")
 print(f"F1-macro:         {knn_f1:.4f}")
+print(f"Recall YES:       {knn_rec:.4f}")
 print(f"CV acc (10-fold): {knn_cv.mean():.4f} ± {knn_cv.std():.4f}")
+
+'''
+print("\nMelhor por métrica (CV):")
+print("accuracy  :", best_acc_row["params"])
+print("f1_macro  :", best_f1_row["params"])
+print("recall_yes:", best_rec_row["params"])
+'''
+
 print("\nMatriz de confusão:")
 print(confusion_matrix(y_test, knn_pred))
 print("\nRelatório:")
-print(classification_report(y_test, knn_pred, zero_division=0))
-
-# --- Permutation Importance (interpretabilidade global) ---
-# Embaralha cada feature e mede quanto a acurácia cai.
-# Se cair muito: a feature é importante. Se não mudar: o modelo não depende dela.
-perm = permutation_importance(knn_model, X_test, y_test, n_repeats=10, random_state=RANDOM_STATE, n_jobs=-1)
-perm_top = np.argsort(perm.importances_mean)[::-1][:10]
-
-print("\nTop 10 features por Permutation Importance (KNN):")
-for i in perm_top:
-    print(f"  {X.columns[i]:<35} {perm.importances_mean[i]:.4f} ± {perm.importances_std[i]:.4f}")
-
-fig, ax = plt.subplots(figsize=(10, 5))
-ax.barh(X.columns[perm_top][::-1], perm.importances_mean[perm_top][::-1])
-ax.set_xlabel("Queda na acurácia ao embaralhar a feature")
-ax.set_title("Permutation Importance — KNN")
-plt.tight_layout()
-plt.savefig("permutation_importance_knn.png", dpi=150)
-print("Gráfico salvo em permutation_importance_knn.png")
-
-# --- LIME (interpretabilidade local) ---
-# LIME explica UMA predição individual: cria variações do exemplo e treina
-# um modelo linear simples ao redor dele para aproximar o comportamento do KNN.
-X_train_transformed = knn_model.named_steps["preprocessor"].transform(X_train)
-
-lime_explainer = LimeTabularExplainer(
-    training_data=X_train_transformed,
-    feature_names=all_feature_names,   # nomes das features após o pipeline
-    class_names=knn_model.classes_,
-    mode="classification",
-    random_state=RANDOM_STATE,
-)
-
-sample_idx = 0  # explica a primeira amostra do conjunto de teste
-sample = knn_model.named_steps["preprocessor"].transform(X_test.iloc[[sample_idx]])
-explanation = lime_explainer.explain_instance(sample[0], knn_model.named_steps["classifier"].predict_proba)
-
-print(f"\nLIME — explicação para a amostra {sample_idx} (real: {y_test.iloc[sample_idx]}, previsto: {knn_pred[sample_idx]}):")
-for feat, weight in explanation.as_list():
-    print(f"  {feat:<50} {weight:+.4f}")
-
-explanation.save_to_file("lime_explanation.html")
-print("Explicação LIME salva em lime_explanation.html")
+print(classification_report(y_test, knn_pred, zero_division=0, target_names=le.classes_))
 
 # =========================
 # COMPARAÇÃO FINAL
@@ -215,8 +244,7 @@ print("="*60)
 print(f"{'Modelo':<25} {'Acurácia':<12} {'F1-macro':<12} {'Recall YES'}")
 print("-"*60)
 
-from sklearn.metrics import recall_score
-print(f"{'Naive Bayes':<25} {acc:<12.4f} {f1m:<12.4f} {recall_score(y_test, y_pred, pos_label='yes'):.4f}")
-print(f"{'Árvore de Decisão':<25} {dt_acc:<12.4f} {dt_f1:<12.4f} {recall_score(y_test, dt_pred, pos_label='yes'):.4f}")
-print(f"{'KNN (k=11)':<25} {knn_acc:<12.4f} {knn_f1:<12.4f} {recall_score(y_test, knn_pred, pos_label='yes'):.4f}")
+print(f"{'Naive Bayes':<25} {acc:<12.4f} {f1m:<12.4f} {recall_score(y_test, y_pred, pos_label=POS_LABEL):.4f}")
+print(f"{'Árvore de Decisão':<25} {dt_acc:<12.4f} {dt_f1:<12.4f} {recall_score(y_test, dt_pred, pos_label=POS_LABEL):.4f}")
+print(f"{'KNN (k=3)':<25} {knn_acc:<12.4f} {knn_f1:<12.4f} {recall_score(y_test, knn_pred, pos_label=POS_LABEL):.4f}")
 print("="*60)

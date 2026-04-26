@@ -16,17 +16,17 @@ A coluna `duration` foi **removida intencionalmente** (data leakage): ela repres
 
 ## Pré-processamento
 
-| Decisão | Justificativa |
-|---|---|
-| `RobustScaler` para numéricas | Menos sensível a outliers que `StandardScaler`. `balance` tem outliers extremos (clientes com saldo muito alto). |
-| `SimpleImputer(median)` para numéricas | Mediana é robusta a outliers, adequada para `pdays` e `balance`. |
-| `SimpleImputer(most_frequent)` para categóricas | Valor mais comum é a melhor estimativa para categorias como `job` e `education`. |
-| `OneHotEncoder` para categóricas | Transforma categorias em colunas binárias sem criar ordenação artificial. |
-| Split estratificado 80/20 | `stratify=y` garante que a proporção de "yes" (12%) é mantida em treino e teste. |
-| `random_state=42` | Reprodutibilidade dos experimentos. |
+- Remoção de duplicatas
+- Split estratificado (`train_test_split(..., stratify=y)`) com `test_size=0.2`
+- `RobustScaler` para variáveis numéricas
+- `OneHotEncoder` para variáveis categóricas
+- `SimpleImputer` para faltantes (mediana em numéricas / moda em categóricas)
+- `LabelEncoder` no alvo (`no=0`, `yes=1`) para compatibilidade estável com KNN e métricas binárias
+- `random_state=42` para reprodutibilidade
 
 ---
 
+## Modelos avaliados
 ## Modelos e Hiperparâmetros
 
 ### Naive Bayes (`GaussianNB`)
@@ -37,10 +37,47 @@ Aprende uma sequência de perguntas binárias sobre as features para separar as 
 - `max_depth=5`: evita overfitting e mantém a árvore legível  
 - `criterion="gini"`: índice Gini mede impureza dos nós (padrão e computacionalmente eficiente)
 
-### KNN (`KNeighborsClassifier`)
-Classifica um ponto pela votação dos k vizinhos mais próximos no espaço de features.  
-- `n_neighbors=11`: ímpar para evitar empates em classificação binária; testamos k=3,5,7,11,21 e k=11 apresentou o melhor equilíbrio entre acurácia e F1  
-- Requer normalização (já garantida pelo `RobustScaler` no pipeline)
+### KNN com GridSearchCV
+
+Foi usado `GridSearchCV` com múltiplas métricas:
+
+- `accuracy`
+- `f1_macro`
+- `recall_yes` (classe positiva = `yes`)
+
+Espaço de busca (`param_grid`):
+
+- `classifier__n_neighbors`: 3 a 31 (ímpares)
+- `classifier__weights`: `uniform`, `distance`
+- `classifier__p`: 1 (Manhattan), 2 (Euclidiana)
+
+#### Resultado do grid (execução debug)
+
+- Melhor por `accuracy`: `k=31, p=1, weights=uniform`
+- Melhor por `f1_macro`: `k=3, p=1, weights=uniform`
+- Melhor por `recall_yes`: `k=3, p=1, weights=distance`
+
+> Na decisão final do trabalho, a escolha principal para KNN prioriza **`recall_yes`**.
+
+#### Observação
+
+- O GridSearch foi desabilitado por padrão e manteve-se a configuração que melhor resultou o `recall_yes`, porém caso queira executa-lo, basta descomentar as linhas que o definem.
+
+---
+
+## Resultados (teste)
+
+| Modelo | Acurácia | F1-macro | Recall YES |
+|---|---:|---:|---:|
+| Naive Bayes | 0.8466 | **0.6562** | **0.4376** |
+| Árvore de Decisão | **0.8937** | 0.6268 | 0.2051 |
+| KNN (seleção com foco em recall) | 0.8731 | 0.6117 | 0.2250 |
+
+### Observações rápidas
+
+- **Naive Bayes** teve o maior `recall` da classe positiva (`yes`), importante quando perder positivos custa caro.
+- **Árvore de decisão** teve maior acurácia geral, mas baixo `recall_yes`.
+- **KNN** ficou intermediário; com Grid Search, os melhores hiperparâmetros variam conforme a métrica escolhida.
 
 ---
 
@@ -84,5 +121,5 @@ Classifica um ponto pela votação dos k vizinhos mais próximos no espaço de f
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install scikit-learn pandas numpy matplotlib seaborn ucimlrepo lime
+pip install scikit-learn pandas numpy matplotlib seaborn ucimlrepo lime tqdm tqdm-joblib
 python main.py

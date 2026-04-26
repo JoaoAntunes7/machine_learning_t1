@@ -116,7 +116,7 @@ print(classification_report(y_test, y_pred, zero_division=0))
 # =========================
 # ÁRVORE DE DECISÃO
 # =========================
-# testa max_depth=3,5,7,10 limitando a profundidade para evitar overfitting e manter legibilidade
+# testa max_depth=3,5,7,10 limitando a profundidade para evitar underfitting, overfitting e manter legibilidade
 # criterion="gini" mede a impureza dos nós (padrão e eficiente)
 
 dt_base = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(random_state=RANDOM_STATE), num_scaler=mc.RobustScaler(), cat_scaler=mc.OneHotEncoder(handle_unknown="ignore"))

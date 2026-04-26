@@ -3,6 +3,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, RobustScaler, MinMaxScaler, StandardScaler
 from sklearn.naive_bayes import GaussianNB, MultinomialNB
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
 
 def get_model(num_cols, cat_cols, model=GaussianNB(), scaler=RobustScaler()):
     preprocessor = ColumnTransformer(

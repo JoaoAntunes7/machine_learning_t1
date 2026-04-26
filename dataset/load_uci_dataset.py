@@ -1,6 +1,6 @@
 from ucimlrepo import fetch_ucirepo
 import pandas as pd
-import pathlib as Path
+from pathlib import Path
 
 # fetch dataset 
 def load_uci_dataset(CSV_PATH, ucirepo_id=222):

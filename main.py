@@ -24,7 +24,6 @@ from tqdm_joblib import tqdm_joblib
 # =========================
 CSV_PATH = "./dataset/bank_marketing.csv"  # arquivo UCI
 TARGET_COL = "y"
-DROP_COLS = ["duration"]                          # evita data leakage
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
 
@@ -39,9 +38,21 @@ df.columns = df.columns.str.strip()
 
 if TARGET_COL not in df.columns:
     raise ValueError(f"Coluna alvo '{TARGET_COL}' não encontrada. Colunas: {list(df.columns)}")
+else:
+    df = df[df[TARGET_COL].notna()] 
 
-drop_existing = [c for c in DROP_COLS if c in df.columns and c != TARGET_COL]
-X = df.drop(columns=[TARGET_COL] + drop_existing)
+print(f"Shape após limpeza: {df.shape}")
+print(f"\nAntes do tratamento de valores ausentes:\n{df.isnull().sum()}")
+
+# Preencher valores ausentes (numéricos com mediana, categóricos com moda)
+df.fillna(df.median(numeric_only=True), inplace=True)  # Numéricos
+for col in df.select_dtypes(include=['object']).columns:
+    if col != TARGET_COL:
+        df[col].fillna(df[col].mode()[0] if not df[col].mode().empty else 'Unknown', inplace=True)
+
+print(f"\nDepois do tratamento de valores ausentes:\n{df.isnull().sum()}")
+
+X = df.drop(columns=[TARGET_COL])
 y = df[TARGET_COL].astype(str).str.strip()
 
 # codifica alvo: ex. no->0, yes->1
@@ -76,7 +87,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 # StandardScaler -> sensível a outiliers (usa média e desvio padrão)
 # RobustScaler   -> menos sensível a outliers (usa mediana e IQR)
 # MinMaxScaler   -> escala para [0, 1], mas pode ser distorcido por outliers
-nb_model = mc.get_model(num_cols, cat_cols, model=mc.GaussianNB(), scaler=mc.RobustScaler())
+nb_model = mc.get_model(num_cols, cat_cols, model=mc.GaussianNB(), num_scaler=mc.RobustScaler())
 
 # Treino real
 nb_model.fit(X_train, y_train)
@@ -107,7 +118,7 @@ print(classification_report(y_test, y_pred, zero_division=0))
 # =========================
 # max_depth=5 limita a profundidade para evitar overfitting e manter legibilidade.
 # criterion="gini" mede a impureza dos nós (padrão e eficiente).
-dt_model = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(max_depth=5, criterion="gini", random_state=RANDOM_STATE), scaler=mc.RobustScaler())
+dt_model = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(max_depth=5, criterion="gini", random_state=RANDOM_STATE), num_scaler=mc.RobustScaler())
 
 dt_model.fit(X_train, y_train)
 dt_pred = dt_model.predict(X_test)
@@ -124,30 +135,6 @@ print("\nMatriz de confusão:")
 print(confusion_matrix(y_test, dt_pred))
 print("\nRelatório:")
 print(classification_report(y_test, dt_pred, zero_division=0))
-
-# Recupera os nomes das features após o pipeline de pré-processamento
-preprocessor      = dt_model.named_steps["preprocessor"]
-ohe_feature_names = preprocessor.named_transformers_["cat"]["onehot"].get_feature_names_out(cat_cols)
-all_feature_names = np.array(num_cols + list(ohe_feature_names))
-
-fig, ax = plt.subplots(figsize=(20, 8))
-
-# classes do modelo (0/1) -> rótulos originais ("no"/"yes")
-tree_class_names = [str(c) for c in le.inverse_transform(dt_model.classes_.astype(int))]
-
-plot_tree(
-    dt_model.named_steps["classifier"],
-    feature_names=all_feature_names,
-    class_names=tree_class_names,  # antes: dt_model.classes_
-    filled=True,
-    max_depth=5,
-    ax=ax,
-    fontsize=8,
-)
-plt.title("Árvore de Decisão (primeiros 5 níveis)")
-plt.tight_layout()
-plt.savefig("decision_tree.png", dpi=150)
-print("\nÁrvore salva em decision_tree.png")
 
 # =========================
 # KNN
@@ -195,11 +182,13 @@ with tqdm_joblib(tqdm(total=total_fits, desc="GridSearchCV (KNN)")):
 knn_model = knn_search.best_estimator_
 '''
 
+n_neighbors = 9  # valor encontrado empiricamente (melhor que o default 5)
 knn_model = mc.get_model(
     num_cols,
     cat_cols,
-    model=mc.KNeighborsClassifier(n_neighbors=3, weights="distance", p=1),
-    scaler=mc.RobustScaler(),
+    model=mc.KNeighborsClassifier(n_neighbors=n_neighbors),
+    num_scaler=mc.StandardScaler(),
+    cat_scaler=mc.OneHotEncoder(handle_unknown="ignore"),
 )
 
 knn_model.fit(X_train, y_train)
@@ -246,5 +235,5 @@ print("-"*60)
 
 print(f"{'Naive Bayes':<25} {acc:<12.4f} {f1m:<12.4f} {recall_score(y_test, y_pred, pos_label=POS_LABEL):.4f}")
 print(f"{'Árvore de Decisão':<25} {dt_acc:<12.4f} {dt_f1:<12.4f} {recall_score(y_test, dt_pred, pos_label=POS_LABEL):.4f}")
-print(f"{'KNN (k=3)':<25} {knn_acc:<12.4f} {knn_f1:<12.4f} {recall_score(y_test, knn_pred, pos_label=POS_LABEL):.4f}")
+print(f'{f"KNN (k={n_neighbors})":<25} {knn_acc:<12.4f} {knn_f1:<12.4f} {recall_score(y_test, knn_pred, pos_label=POS_LABEL):.4f}')
 print("="*60)

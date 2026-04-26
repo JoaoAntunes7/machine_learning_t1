@@ -123,16 +123,19 @@ else:
     dt_model = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(ccp_alpha=0.001, class_weight="balanced", max_depth=12, criterion="gini",max_features="log2", min_samples_leaf=1, min_samples_split=2, random_state=RANDOM_STATE), num_scaler=mc.RobustScaler())
 
 dt_model.fit(X_train, y_train)
+
 dt_pred = dt_model.predict(X_test)
 dt_acc  = accuracy_score(y_test, dt_pred)
 dt_f1   = f1_score(y_test, dt_pred, average="macro")
+dt_rec  = recall_score(y_test, dt_pred, pos_label=POS_LABEL)
 
-dt_cv = cross_val_score(dt_model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
+dt_cv   = cross_val_score(dt_model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
 
 print("\n=== ÁRVORE DE DECISÃO ===")
 print(f"Acurácia:         {dt_acc:.4f}")
 print(f"F1-macro:         {dt_f1:.4f}")
 print(f"CV acc (10-fold): {dt_cv.mean():.4f} ± {dt_cv.std():.4f}")
+print(f"Recall:           {dt_rec:.4f}")
 print("\nMatriz de confusão:")
 print(confusion_matrix(y_test, dt_pred))
 print("\nRelatório:")

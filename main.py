@@ -116,21 +116,28 @@ print(classification_report(y_test, y_pred, zero_division=0))
 # =========================
 # ÁRVORE DE DECISÃO
 # =========================
-# max_depth=5 limita a profundidade para evitar overfitting e manter legibilidade.
-# criterion="gini" mede a impureza dos nós (padrão e eficiente).
-dt_model = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(max_depth=5, criterion="gini", random_state=RANDOM_STATE), num_scaler=mc.RobustScaler())
+# testa max_depth=3,5,7,10 limitando a profundidade para evitar overfitting e manter legibilidade
+# criterion="gini" mede a impureza dos nós (padrão e eficiente)
 
-dt_model.fit(X_train, y_train)
+dt_base = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(random_state=RANDOM_STATE), num_scaler=mc.RobustScaler(), cat_scaler=mc.OneHotEncoder(handle_unknown="ignore"))
+param_grid = {"classifier__max_depth": [3, 5, 7, 10], "classifier__criterion": ["gini"]}
+dt_search = GridSearchCV(estimator=dt_base, param_grid=param_grid, cv=cv, scoring="accuracy", n_jobs=-1)
+
+dt_search.fit(X_train, y_train)
+
+dt_model = dt_search.best_estimator_
 dt_pred = dt_model.predict(X_test)
 dt_acc  = accuracy_score(y_test, dt_pred)
 dt_f1   = f1_score(y_test, dt_pred, average="macro")
+dt_rec  = recall_score(y_test, dt_pred, pos_label=POS_LABEL)
 
-dt_cv = cross_val_score(dt_model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
+dt_cv   = cross_val_score(dt_model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
 
 print("\n=== ÁRVORE DE DECISÃO ===")
 print(f"Acurácia:         {dt_acc:.4f}")
 print(f"F1-macro:         {dt_f1:.4f}")
 print(f"CV acc (10-fold): {dt_cv.mean():.4f} ± {dt_cv.std():.4f}")
+print(f"Recall:           {dt_rec:.4f}")
 print("\nMatriz de confusão:")
 print(confusion_matrix(y_test, dt_pred))
 print("\nRelatório:")

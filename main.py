@@ -1,23 +1,19 @@
 import numpy as np
 import pandas as pd
 from dataset.load_uci_dataset import load_uci_dataset
+from model import dt_grid_search
+from model.knn_grid_search import knn_grid_search
 import model.model_choice as mc
 
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score, GridSearchCV, ParameterGrid
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import LabelEncoder
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
     classification_report,
     confusion_matrix,
     recall_score,
-    make_scorer,
 )
-from sklearn.tree import plot_tree
-import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
-from tqdm_joblib import tqdm_joblib
 
 # =========================
 # CONFIG
@@ -26,6 +22,8 @@ CSV_PATH = "./dataset/bank_marketing.csv"  # arquivo UCI
 TARGET_COL = "y"
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
+KNN_GRID_SEARCH = False  # se True, executa GridSearchCV para KNN (pode ser demorado)
+DT_GRID_SEARCH = False   # se True, executa GridSearchCV para Árvore de Decisão (muito demorado)
 
 # =========================
 # LOAD
@@ -41,16 +39,18 @@ if TARGET_COL not in df.columns:
 else:
     df = df[df[TARGET_COL].notna()] 
 
-print(f"Shape após limpeza: {df.shape}")
-print(f"\nAntes do tratamento de valores ausentes:\n{df.isnull().sum()}")
+# print(f"Shape após limpeza: {df.shape}")
+# print(f"\nAntes do tratamento de valores ausentes:\n{df.isnull().sum()}")
 
 # Preencher valores ausentes (numéricos com mediana, categóricos com moda)
-df.fillna(df.median(numeric_only=True), inplace=True)  # Numéricos
-for col in df.select_dtypes(include=['object']).columns:
-    if col != TARGET_COL:
-        df[col].fillna(df[col].mode()[0] if not df[col].mode().empty else 'Unknown', inplace=True)
+df = df.fillna(df.median(numeric_only=True))
 
-print(f"\nDepois do tratamento de valores ausentes:\n{df.isnull().sum()}")
+for col in df.select_dtypes(include=["object", "string"]).columns:
+    if col != TARGET_COL:
+        mode_val = df[col].mode().iloc[0] if not df[col].mode().empty else "Unknown"
+        df[col] = df[col].fillna(mode_val)
+
+# print(f"\nDepois do tratamento de valores ausentes:\n{df.isnull().sum()}")
 
 X = df.drop(columns=[TARGET_COL])
 y = df[TARGET_COL].astype(str).str.strip()
@@ -116,9 +116,11 @@ print(classification_report(y_test, y_pred, zero_division=0))
 # =========================
 # ÁRVORE DE DECISÃO
 # =========================
-# max_depth=5 limita a profundidade para evitar overfitting e manter legibilidade.
-# criterion="gini" mede a impureza dos nós (padrão e eficiente).
-dt_model = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(max_depth=5, criterion="gini", random_state=RANDOM_STATE), num_scaler=mc.RobustScaler())
+
+if(DT_GRID_SEARCH):
+    dt_model = dt_grid_search(POS_LABEL, RANDOM_STATE, X_train, y_train, num_cols, cat_cols, cv).best_estimator_
+else:
+    dt_model = mc.get_model(num_cols, cat_cols, model=mc.DecisionTreeClassifier(ccp_alpha=0.001, class_weight="balanced", max_depth=12, criterion="gini",max_features="log2", min_samples_leaf=1, min_samples_split=2, random_state=RANDOM_STATE), num_scaler=mc.RobustScaler())
 
 dt_model.fit(X_train, y_train)
 dt_pred = dt_model.predict(X_test)
@@ -140,56 +142,19 @@ print(classification_report(y_test, dt_pred, zero_division=0))
 # KNN
 # =========================
 
-'''
-knn_base = mc.get_model(
-    num_cols,
-    cat_cols,
-    model=mc.KNeighborsClassifier(),
-    scaler=mc.RobustScaler(),
-)
+if(KNN_GRID_SEARCH):
+    knn_model = knn_grid_search(POS_LABEL, X_train, y_train, num_cols, cat_cols, cv).best_estimator_
+else: 
+    knn_model = mc.get_model(
+        num_cols,
+        cat_cols,
+        model=mc.KNeighborsClassifier(n_neighbors=3, p=2, weights="distance"),
+        num_scaler=mc.StandardScaler(),
+        cat_scaler=mc.OneHotEncoder(handle_unknown="ignore"),
+    )
 
-param_grid = {
-    "classifier__n_neighbors": list(range(3, 32, 2)),
-    "classifier__weights": ["uniform", "distance"],
-    "classifier__p": [1, 2],
-}
-
-scoring = {
-    "accuracy": "accuracy",
-    "f1_macro": "f1_macro",
-    "recall_yes": make_scorer(
-        recall_score,
-        average="binary",
-        pos_label=POS_LABEL,
-        zero_division=0,
-    ),
-}
-
-knn_search = GridSearchCV(
-    estimator=knn_base,
-    param_grid=param_grid,
-    scoring=scoring,
-    refit="f1_macro",
-    cv=cv,
-    n_jobs=-1,           # paralelo + barra de progresso
-    error_score="raise", # mostra erro real sem esconder
-)
-
-total_fits = len(ParameterGrid(param_grid)) * cv.get_n_splits(X_train, y_train)
-with tqdm_joblib(tqdm(total=total_fits, desc="GridSearchCV (KNN)")):
-    knn_search.fit(X_train, y_train)
-
-knn_model = knn_search.best_estimator_
-'''
-
-n_neighbors = 9  # valor encontrado empiricamente (melhor que o default 5)
-knn_model = mc.get_model(
-    num_cols,
-    cat_cols,
-    model=mc.KNeighborsClassifier(n_neighbors=n_neighbors),
-    num_scaler=mc.StandardScaler(),
-    cat_scaler=mc.OneHotEncoder(handle_unknown="ignore"),
-)
+#n_neighbors = knn_model.n_neighbors
+n_neighbors = knn_model.get_params()["classifier__n_neighbors"]
 
 knn_model.fit(X_train, y_train)
 knn_pred = knn_model.predict(X_test)
@@ -198,26 +163,11 @@ knn_f1   = f1_score(y_test, knn_pred, average="macro")
 knn_rec  = recall_score(y_test, knn_pred, pos_label=POS_LABEL)
 knn_cv   = cross_val_score(knn_model, X, y, scoring="accuracy", cv=cv, n_jobs=-1)
 
-'''
-cv_res = pd.DataFrame(knn_search.cv_results_)
-best_acc_row = cv_res.loc[cv_res["mean_test_accuracy"].idxmax()]
-best_f1_row  = cv_res.loc[cv_res["mean_test_f1_macro"].idxmax()]
-best_rec_row = cv_res.loc[cv_res["mean_test_recall_yes"].idxmax()]
-'''
-
 print("\n=== KNN ===")
-#print(f"Melhor (refit=f1_macro): {knn_search.best_params_}")
 print(f"Acurácia:         {knn_acc:.4f}")
 print(f"F1-macro:         {knn_f1:.4f}")
 print(f"Recall YES:       {knn_rec:.4f}")
 print(f"CV acc (10-fold): {knn_cv.mean():.4f} ± {knn_cv.std():.4f}")
-
-'''
-print("\nMelhor por métrica (CV):")
-print("accuracy  :", best_acc_row["params"])
-print("f1_macro  :", best_f1_row["params"])
-print("recall_yes:", best_rec_row["params"])
-'''
 
 print("\nMatriz de confusão:")
 print(confusion_matrix(y_test, knn_pred))

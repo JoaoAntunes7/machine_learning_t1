@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+from interpretability.interpretability import explain_with_lime
+
 from dataset.load_uci_dataset import load_uci_dataset
 from model import dt_grid_search
 from model.knn_grid_search import knn_grid_search
@@ -190,3 +192,40 @@ print(f"{'Naive Bayes':<25} {acc:<12.4f} {f1m:<12.4f} {recall_score(y_test, y_pr
 print(f"{'Árvore de Decisão':<25} {dt_acc:<12.4f} {dt_f1:<12.4f} {recall_score(y_test, dt_pred, pos_label=POS_LABEL):.4f}")
 print(f'{f"KNN (k={n_neighbors})":<25} {knn_acc:<12.4f} {knn_f1:<12.4f} {recall_score(y_test, knn_pred, pos_label=POS_LABEL):.4f}')
 print("="*60)
+
+# =========================
+# INTERPRETABILIDADE (LIME)
+# =========================
+print("\n=== INTERPRETABILIDADE (LIME) ===")
+explain_with_lime(
+    fitted_pipeline=nb_model,
+    X_train_df=X_train,
+    X_test_df=X_test,
+    y_test_arr=y_test,
+    y_pred_arr=y_pred,
+    class_names=le.classes_,
+    model_name="Naive Bayes",
+    random_state=RANDOM_STATE,
+)
+
+explain_with_lime(
+    fitted_pipeline=dt_model,
+    X_train_df=X_train,
+    X_test_df=X_test,
+    y_test_arr=y_test,
+    y_pred_arr=dt_pred,
+    class_names=le.classes_,
+    model_name="Arvore de Decisao",
+    random_state=RANDOM_STATE,
+)
+
+explain_with_lime(
+    fitted_pipeline=knn_model,
+    X_train_df=X_train,
+    X_test_df=X_test,
+    y_test_arr=y_test,
+    y_pred_arr=knn_pred,
+    class_names=le.classes_,
+    model_name="KNN",
+    random_state=RANDOM_STATE,
+)

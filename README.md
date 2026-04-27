@@ -7,46 +7,84 @@
 
 Problema: prever se um cliente irá subscrever um depósito a prazo após campanha de telemarketing.
 
-A coluna `duration` foi removida por **data leakage** (só é conhecida após a ligação).
-
 ---
 
 ## Pré-processamento
 
 - Remoção de duplicatas
 - Tratamento de faltantes:
-  - Numéricas: mediana
-  - Categóricas: moda
-- `LabelEncoder` no alvo (`no=0`, `yes=1`)
-- Split estratificado (`test_size=0.2`, `random_state=42`)
-- Validação cruzada com `StratifiedKFold(n_splits=10, shuffle=True, random_state=42)`
+  - Numéricas: mediana, robusta a outliers.
+  - Categóricas: moda, mantém a categoria mais frequente.
+- `LabelEncoder` no alvo (`no=0`, `yes=1`), necessário para os classificadores sklearn.
+- Split estratificado (80/20) para preservar a proporção da classe minoritária.
+- Validação cruzada com `StratifiedKFold(k=10)` para uma estimativa mais confiável do modelo real.
 
 ---
 
 ## Modelos e configuração atual
 
 ### Naive Bayes
-- `GaussianNB`
-- Pipeline com `RobustScaler` para variáveis numéricas
+- Modelo `GaussianNB`
+  - `GaussianNB` assume distribuição normal para variáveis numéricas, sendo mais recomendado para dados bancários.
+  - `MultinomialNB` foi descartado por gerar muitos falsos negativos neste dataset.
+- Pipeline com `RobustScaler` para variáveis numéricas.
+  - `RobustScaler` reduz o impacto de outliers sem distorcer a distribuição.
 
 ### Árvore de Decisão
-- `DecisionTreeClassifier`
-- Hiperparâmetros atuais:
-  - `ccp_alpha=0.001`
-  - `class_weight="balanced"`
-  - `max_depth=12`
-  - `criterion="gini"`
-  - `max_features="log2"`
-  - `min_samples_leaf=1`
-  - `min_samples_split=2`
-  - `random_state=42`
-- Pipeline com `RobustScaler` para numéricas
+- Modelo `DecisionTreeClassifier`
+  - `class_weight="balanced"` compensa o desbalanceamento da classe `yes`.
+  - `ccp_alpha=0.001` aplica poda para reduzir overfitting.
+  - `refit="f1_macro"` no GridSearch prioriza equilíbrio entre as classes. 
+- Pipeline com `RobustScaler` para numéricas.
+- 
+#### GridSearch (`DT_GRID_SEARCH=True`)
+Otimização por `GridSearchCV` com `refit="f1_macro"` e os seguintes espaços de busca:
+
+| Parâmetro              | Valores buscados            |
+|------------------------|-----------------------------|
+| `criterion`            | `gini`, `entropy`           |
+| `max_depth`            | `3, 5, 8, 12, None`         |
+| `min_samples_split`    | `2, 10, 30`                 |
+| `min_samples_leaf`     | `1, 5, 10`                  |
+| `max_features`         | `sqrt`, `log2`              |
+| `class_weight`         | `balanced`                  |
+| `ccp_alpha`            | `0.0, 1e-4, 1e-3`           |
+
+#### Configuração manual (`DT_GRID_SEARCH=False`)
+Parâmetros definidos a partir do melhor resultado obtido em execução anterior do GridSearch:
+
+- `criterion="gini"`
+- `max_depth=12`
+- `min_samples_split=2`
+- `min_samples_leaf=1`
+- `max_features="log2"`
+- `class_weight="balanced"`
+- `ccp_alpha=0.001`
+- `random_state=42`
 
 ### KNN
-- `KNeighborsClassifier(n_neighbors=3, p=2, weights="distance")`
+- Modelo `KNeighborsClassifier`
 - Pipeline:
   - Numéricas: `StandardScaler`
-  - Categóricas: `OneHotEncoder(handle_unknown="ignore")`
+  - Categóricas: `OneHotEncoder`
+ - KNN é sensível à escala, então a normalização é obrigatória. `OneHotEncoder` converte categóricas em distâncias mensuráveis. `refit="f1_macro"` no GridSearch prioriza equilíbrio entre classes.
+
+ 
+#### GridSearch (`KNN_GRID_SEARCH=True`)
+Otimização por `GridSearchCV` com `refit="f1_macro"` e os seguintes espaços de busca:
+
+| Parâmetro         | Valores buscados                          |
+|-------------------|-------------------------------------------|
+| `n_neighbors`     | `3, 5, 7, ..., 31` (ímpares, range(3,32,2)) |
+| `weights`         | `uniform`, `distance`                     |
+| `p`               | `1` (Manhattan), `2` (Euclidiana)         |
+
+#### Configuração manual (`KNN_GRID_SEARCH=False`)
+Parâmetros definidos a partir do melhor resultado obtido em execução anterior do GridSearch:
+
+- `n_neighbors=3`
+- `weights="distance"`
+- `p=2` (distância Euclidiana)
 
 > `KNN_GRID_SEARCH` e `DT_GRID_SEARCH` estão desabilitados por padrão no `main.py`.
 
@@ -102,7 +140,7 @@ Relatório (resumo):
 
 ---
 
-## Comparação final
+## Comparação das medidas de avaliação
 
 | Modelo | Acurácia | F1-macro | Recall YES |
 |---|---:|---:|---:|
@@ -116,7 +154,34 @@ Relatório (resumo):
 - **Melhor recall da classe positiva (`yes`):** Árvore de Decisão
 - **Naive Bayes:** desempenho equilibrado, com recall `yes` intermediário
 
+> No contexto de telemarketing, **recall da classe `yes`** é a métrica mais relevante: errar um cliente que aceitaria o produto tem custo maior do que ligar para quem recusaria. Por esse critério, a **Árvore de Decisão** é o modelo mais adequado.
+
 ---
+
+## Interpretabilidade
+
+### Árvore de Decisão
+- **Método:** Visualização da árvore e importância de features (`feature_importances_`).
+- **Vantagem:** Totalmente interpretável, cada predição pode ser rastreada como uma sequência de regras if/else.
+- **Limitação:** Árvores profundas (`max_depth=12`) perdem legibilidade. Poda via `ccp_alpha` mitiga isso.
+
+### Naive Bayes
+- **Método:** Análise das probabilidades condicionais (`theta_` e `var_` do GaussianNB).
+- **Vantagem:** Interpretável via probabilidades, é possível identificar quais valores de feature mais elevam P(yes | X).
+- **Limitação:** Assume independência entre features, o que raramente é verdadeiro. Resultados podem ser enganosos quando há correlação entre variáveis (ex: `age` e `job`).
+
+### KNN
+- **Método:** SHAP (SHapley Additive exPlanations).
+- **Vantagem:** SHAP distribui a contribuição de cada feature para uma predição com base em teoria dos jogos, permitindo explicações tanto locais (por instância) quanto globais (importância média das features no modelo).
+- **Limitação:** KNN é inerentemente uma caixa-preta — não há parâmetros globais interpretáveis. A explicação depende do ponto analisado e pode variar muito entre instâncias similares.
+
+---
+
+## Comparação e Análise final
+
+- Os modelos, em linhas gerais, concordam nas variáveis mais relevantes. Features como `duration`, `poutcome` e `balance` aparecem como relevantes nos três modelos, o que dá consistência aos resultados.
+- O alto recall da Árvore de Decisão faz sentido dado o uso de `class_weight="balanced"`. Já o KNN alcança maior acurácia geral mas sacrifica o recall da classe minoritária.
+- A Árvore de Decisão oferece alta interpretabilidade, mas perde legibilidade com profundidade elevada. O Naive Bayes tem interpretabilidade média, limitada pela suposição de independência entre features. O KNN é o menos interpretável dos três, pois sem parâmetros globais, depende de SHAP para explicar predições individuais.
 
 ## Como executar
 

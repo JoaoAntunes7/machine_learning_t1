@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from interpretability.interpretability import explain_with_lime
+from interpretability.interpretability import explain_with_lime, explain_with_shap
 
 from dataset.load_uci_dataset import load_uci_dataset
 from model import dt_grid_search
@@ -220,6 +220,43 @@ explain_with_lime(
 )
 
 explain_with_lime(
+    fitted_pipeline=knn_model,
+    X_train_df=X_train,
+    X_test_df=X_test,
+    y_test_arr=y_test,
+    y_pred_arr=knn_pred,
+    class_names=le.classes_,
+    model_name="KNN",
+    random_state=RANDOM_STATE,
+)
+
+# =========================
+# INTERPRETABILIDADE (SHAP)
+# =========================
+print("\n=== INTERPRETABILIDADE (SHAP) ===")
+explain_with_shap(
+    fitted_pipeline=nb_model,
+    X_train_df=X_train,
+    X_test_df=X_test,
+    y_test_arr=y_test,
+    y_pred_arr=y_pred,
+    class_names=le.classes_,
+    model_name="Naive Bayes",
+    random_state=RANDOM_STATE,
+)
+
+explain_with_shap(
+    fitted_pipeline=dt_model,
+    X_train_df=X_train,
+    X_test_df=X_test,
+    y_test_arr=y_test,
+    y_pred_arr=dt_pred,
+    class_names=le.classes_,
+    model_name="Arvore de Decisao",
+    random_state=RANDOM_STATE,
+)
+
+explain_with_shap(
     fitted_pipeline=knn_model,
     X_train_df=X_train,
     X_test_df=X_test,

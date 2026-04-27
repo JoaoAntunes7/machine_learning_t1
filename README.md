@@ -123,6 +123,6 @@ Relatório (resumo):
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install scikit-learn pandas numpy matplotlib seaborn ucimlrepo lime tqdm tqdm-joblib
+pip install scikit-learn pandas numpy matplotlib seaborn ucimlrepo lime tqdm tqdm-joblib shap
 python main.py
 ```

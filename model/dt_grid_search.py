@@ -32,7 +32,7 @@ def dt_grid_search(POS_LABEL, RANDOM_STATE, X_train, y_train, num_cols, cat_cols
             "f1_macro": "f1_macro",
             "recall_yes": recall_yes_scorer,
         },
-        refit="f1_macro",   # pode trocar para "recall_yes" se esse for o foco
+        refit="f1_macro", 
         cv=cv,
         n_jobs=-1,
         verbose=1,

@@ -35,14 +35,12 @@ def knn_grid_search(POS_LABEL, X_train, y_train, num_cols, cat_cols, cv):
         scoring=scoring,
         refit="f1_macro",
         cv=cv,
-        n_jobs=-1,           # paralelo + barra de progresso
-        error_score="raise", # mostra erro real sem esconder
+        n_jobs=-1,          
+        error_score="raise",
     )
 
     total_fits = len(ParameterGrid(param_grid)) * cv.get_n_splits(X_train, y_train)
     with tqdm_joblib(tqdm(total=total_fits, desc="GridSearchCV (KNN)")):
         knn_search.fit(X_train, y_train)
-
-    # knn_model = knn_search.best_estimator_
     
     return knn_search

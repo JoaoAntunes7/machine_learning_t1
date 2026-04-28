@@ -41,9 +41,6 @@ if TARGET_COL not in df.columns:
 else:
     df = df[df[TARGET_COL].notna()] 
 
-# print(f"Shape após limpeza: {df.shape}")
-# print(f"\nAntes do tratamento de valores ausentes:\n{df.isnull().sum()}")
-
 # Preencher valores ausentes (numéricos com mediana, categóricos com moda)
 df = df.fillna(df.median(numeric_only=True))
 
@@ -52,8 +49,6 @@ for col in df.select_dtypes(include=["object", "string"]).columns:
         mode_val = df[col].mode().iloc[0] if not df[col].mode().empty else "Unknown"
         df[col] = df[col].fillna(mode_val)
 
-# print(f"\nDepois do tratamento de valores ausentes:\n{df.isnull().sum()}")
-
 X = df.drop(columns=[TARGET_COL])
 y = df[TARGET_COL].astype(str).str.strip()
 
@@ -61,7 +56,6 @@ y = df[TARGET_COL].astype(str).str.strip()
 le = LabelEncoder()
 y = le.fit_transform(y)
 
-# opcional: garante o índice da classe positiva "yes"
 POS_LABEL = int(le.transform(["yes"])[0])
 
 num_cols = X.select_dtypes(include=[np.number]).columns.tolist()
@@ -75,20 +69,8 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 # =========================
-# PREPROCESS + NB_MODEL
+# NAIVE BAYES
 # =========================
-
-# GaussianNB    -> para variáveis numéricas (assume distribuição normal), como são dados bancários,
-#                  é razoável assumir que as variáveis numéricas seguem uma distribuição normal (ou próxima disso). 
-#                  Portanto, o GaussianNB é a escolha mais apropriada para este dataset.
-# MultinomialNB -> para variáveis categóricas (usa contagem de frequências)
-#                  Não é o ideal pra esse tipo de dataset e portanto não teve um desempenho tão bom.
-#                  Gerou muitos falsos negativos 
-#                  (Precisa ser executado com o MinMaxScaler, por conta de valores naturalmente negativos)
-
-# StandardScaler -> sensível a outiliers (usa média e desvio padrão)
-# RobustScaler   -> menos sensível a outliers (usa mediana e IQR)
-# MinMaxScaler   -> escala para [0, 1], mas pode ser distorcido por outliers
 nb_model = mc.get_model(num_cols, cat_cols, model=mc.GaussianNB(), num_scaler=mc.RobustScaler())
 
 # Treino real
@@ -158,7 +140,6 @@ else:
         cat_scaler=mc.OneHotEncoder(handle_unknown="ignore"),
     )
 
-#n_neighbors = knn_model.n_neighbors
 n_neighbors = knn_model.get_params()["classifier__n_neighbors"]
 
 knn_model.fit(X_train, y_train)
